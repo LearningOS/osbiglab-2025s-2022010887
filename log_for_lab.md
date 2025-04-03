@@ -20,8 +20,8 @@
 
 - 撰写了群里分派的文档任务， 包括Unixbench 测例的题目描述、编译方法、样例输出、评分依据。[oskernel-testsuits-cooperation/doc/Unixbench.md](https://github.com/oscomp/oskernel-testsuits-cooperation/blob/master/doc/Unixbench.md)
 - 按照上次陈老师的建议看了 [https://github.com/LearningOS](https://github.com/LearningOS) 里的 [2025春夏季开源操作系统训练营](https://github.com/LearningOS/rust-based-os-comp2025/blob/main/2025-spring-summary.md) ，确实非常有用
-- 一起写了一部分系统调用，目前通过了过半的 libctest ,分数300+
+- 写了一部分 syscall
 
-下周计划：
+目前进度：汇总后通过了过半的 libctest ,分数300+
 
-- 进一步实现更多的系统调用，争取通过更多的libctest测例
+下周计划：进一步实现更多的系统调用，争取通过更多的libctest测例
