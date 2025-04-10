@@ -6,56 +6,29 @@
 
 **poll**
 
-```rust
-//api/arceos_posix_api/src/imp/fd_ops.rs
+* 监视一组文件描述符，阻塞等待直到以下情况之一发生：
 
-pub fn sys_poll(fds: UserPtr<PollFd>, nfds: c_ulong, timeout: c_int) -> LinuxResult<isize> {
-    // 将用户指针 `fds` 转换为数组，并检查其有效性
-    let fds = fds.get_as_array(nfds as _)?;
-    // 将数组转换为可变的 `PollFd` 切片
-    let fds: &mut [PollFd] = unsafe { core::slice::from_raw_parts_mut(fds, nfds as _) };
-    // 调用 `api::sys_poll` 函数并返回结果
-    Ok(api::sys_poll(fds, timeout) as _)
-}
-```
+  * 至少一个文件描述符就绪（可读/可写/异常）。
+  * 超时。
+  * 被信号中断（如 `SIGINT`）。
 
 ```rust
 
-/// `sys_poll` 系统调用的封装函数
 ///
 /// # 参数
-/// - `fds`: 一个可变的 `PollFd` 切片，指定需要监控的文件描述符
-/// - `timeout`: 超时时间（以毫秒为单位）。负值表示无限等待，0 表示立即返回
+/// - `fds`: 需要监控的文件描述符
+/// - `timeout`: 超时时间（以毫秒为单位），负值表示无限等待，0 表示立即返回
 ///
 /// # 返回值
 /// - 返回准备就绪的文件描述符数量（≥0）
-/// - 如果发生错误，返回 `LinuxError`
-pub fn sys_poll(fds: &mut [PollFd], timeout: i32) -> i32 {
-    // 打印调试信息
-    debug!("sys_poll <= fds: {:?}, timeout: {}", fds, timeout);
-    // 调用 `sys_poll_impl` 实现函数
-    syscall_body!(sys_poll, sys_poll_impl(fds, timeout))
-}
-
-/// 监控多个文件描述符的事件状态，并支持毫秒级超时精度
-///
-/// # 参数
-/// - `fds`: 一个可变的 [`PollFd`] 切片，指定需要监控的文件描述符
-/// - `timeout`: 超时时间（以毫秒为单位）。负值表示无限等待，0 表示立即返回
-///
-/// # 返回值
-/// - `Ok(i32)`: 返回准备就绪的文件描述符数量（≥0）
 /// - `Err(LinuxError)`: 如果发生错误，返回 Linux 错误码
-///
-/// # 安全性
-/// - 调用者必须确保 `fds` 中的元素在调用期间保持有效
-/// - [`PollFd`] 的内存布局必须与 C 的 `struct pollfd` 匹配
+
 pub fn sys_poll_impl(fds: &mut [PollFd], timeout: i32) -> LinuxResult<i32> {
     // 初始化所有文件描述符的返回事件为 0
     for fd in fds.iter_mut() {
         fd.revents = 0;
     }
-    // 获取当前时间（以纳秒为单位）
+    // 获取当前时间（以ns为单位）
     let now = axhal::time::monotonic_time_nanos();
     loop {
         let mut updated = false;
@@ -124,44 +97,7 @@ pub fn sys_poll_impl(fds: &mut [PollFd], timeout: i32) -> LinuxResult<i32> {
 }
 ```
 
-**ppoll**
-
-```rust
-//api/arceos_posix_api/src/imp/fd_ops.rs
-
-pub fn sys_ppoll(fds: &mut [PollFd], timeout: *const timespec, _sigmask: *const c_void) -> i32 {
-    // 打印调试信息，显示传入的文件描述符数组和超时时间
-    debug!("sys_ppoll <= fds: {:?}, timeout: {:?}", fds, timeout);
-
-    // 使用 `syscall_body!` 宏封装系统调用逻辑
-    syscall_body!(sys_poll, {
-        let mut block = false; // 是否阻塞标志
-        let mut timeout_nanos: u64 = 0; // 超时时间（以纳秒为单位）
-
-        if timeout.is_null() {
-            // 如果 `timeout` 为 null，表示无限阻塞
-            block = true;
-        } else {
-            let secs;
-            let nsecs;
-            unsafe {
-                // 从 `timespec` 结构体中读取秒和纳秒
-                secs = (*timeout).tv_sec;
-                nsecs = (*timeout).tv_nsec;
-            }
-            // 检查秒和纳秒的有效性
-            if secs < 0 || nsecs < 0 || nsecs > 999_999_999 {
-                return Err(LinuxError::EINVAL); // 返回无效参数错误
-            }
-            // 将秒和纳秒转换为纳秒总数
-            timeout_nanos = secs as u64 * NANOS_PER_SEC + nsecs as u64;
-        }
-
-        // 调用 `sys_poll_impl` 实现函数，传入文件描述符数组、超时时间和阻塞标志
-        sys_poll_impl(fds, timeout_nanos, block)
-    })
-}
-```
+**ppoll：在 `poll` 的基础上扩展，主要改进 **信号处理（屏蔽部分信号）** 和 **超时精度（精度更高）。****
 
 ```rust
 
@@ -171,27 +107,26 @@ pub fn sys_ppoll(
     timeout: UserConstPtr<timespec>, // 用户指针，指向超时时间的 `timespec` 结构体
     sigmask: UserConstPtr<c_void>,   // 用户指针，指向信号掩码
 ) -> LinuxResult<isize> {
-    // 将用户指针 `fds` 转换为数组，并检查其有效性
+    // 对用户指针 `fds` 进行类型转换并检查其有效性
     let fds = fds.get_as_array(nfds as _)?;
-    // 将数组转换为可变的 `PollFd` 切片
     let fds: &mut [PollFd] = unsafe { core::slice::from_raw_parts_mut(fds, nfds as _) };
 
     // 处理超时时间指针，允许为空
     let timeout = timeout
-        .nullable(UserConstPtr::get)? // 如果指针非空，获取其值
-        .unwrap_or(core::ptr::null()); // 如果为空，返回空指针
+        .nullable(UserConstPtr::get)? 
+        .unwrap_or(core::ptr::null()); 
 
     // 处理信号掩码指针，允许为空
     let sigmask = sigmask
-        .nullable(UserConstPtr::get)? // 如果指针非空，获取其值
-        .unwrap_or(core::ptr::null()); // 如果为空，返回空指针
+        .nullable(UserConstPtr::get)? 
+        .unwrap_or(core::ptr::null()); 
 
-    // 调用 `api::sys_ppoll` 函数并返回结果
+    // 调用 api::sys_ppoll 函数
     Ok(api::sys_ppoll(fds, timeout, sigmask) as _)
 }
 ```
 
-**pread64**
+**pread64：从文件描述符的指定偏移量读取数据**
 
 ```rust
 /// 从文件描述符的指定偏移量读取数据
@@ -203,26 +138,25 @@ pub fn sys_ppoll(
 /// - offset: 偏移量
 ///
 /// # 返回值
-/// - 返回读取的字节数，如果发生错误，返回负值表示错误码
+/// - 返回读取的字节数，如果发生错误返回错误码
 pub fn sys_pread64(
     fd: c_int,
     buf: *mut c_void,
     count: usize,
     offset: ctypes::off_t,
 ) -> ctypes::ssize_t {
-    // 打印调试信息，显示文件描述符、缓冲区地址、字节数和偏移量
     debug!(
         "sys_pread64 <= {} {:#x} {} {}",
         fd, buf as usize, count, offset
-    );    // 使用 syscall_body! 宏封装系统调用逻辑
+    );  
     syscall_body!(sys_pread64, {
-        // 检查缓冲区指针是否为空
         if buf.is_null() {
-            return Err(LinuxError::EFAULT); // 返回无效地址错误
-        }        // 将缓冲区转换为可变切片
-        let dst = unsafe { core::slice::from_raw_parts_mut(buf as *mut u8, count) };        #[cfg(feature = "fd")]
+            return Err(LinuxError::EFAULT); // 缓冲区指针为空，返回无效地址错误
+        } 
+        let dst = unsafe { core::slice::from_raw_parts_mut(buf as *mut u8, count) };
+        #[cfg(feature = "fd")]
         {
-            // 如果启用了 fd 功能，使用文件操作
+            //// 如果启用了 fd 功能，使用文件操作
             let file = File::from_fd(fd)?; // 从文件描述符获取文件对象
             let file = file.inner();
             let origin_offset = file.lock().seek(SeekFrom::Current(0))?; // 保存当前偏移量
@@ -244,7 +178,7 @@ pub fn sys_pread64(
 }
 ```
 
-**readv**
+**readv：批量读取**
 
 ```rust
 /// 按批读取
@@ -257,26 +191,22 @@ pub fn sys_pread64(
 /// # 返回值
 /// - 返回读取的字节数，如果发生错误，返回负值表示错误码
 pub unsafe fn sys_readv(fd: c_int, iov: *const ctypes::iovec, iocnt: c_int) -> ctypes::ssize_t {
-    // 打印调试信息，显示文件描述符
     debug!("sys_readv <= fd: {}", fd);
-
-    // 使用 `syscall_body!` 宏封装系统调用逻辑
     syscall_body!(sys_readv, {
         // 检查 `iocnt` 是否在有效范围内
         if !(0..=1024).contains(&iocnt) {
             return Err(LinuxError::EINVAL); // 返回无效参数错误
         }
 
-        // 将 `iov` 转换为切片
         let iovs = unsafe { core::slice::from_raw_parts(iov, iocnt as usize) };
         let mut ret = 0; // 累计读取的字节数
 
         for iov in iovs.iter() {
-            // 调用 `sys_read` 读取数据
+            //// 调用 `sys_read` 读取数据
             let result = sys_read(fd, iov.iov_base, iov.iov_len as usize);
             ret += result;
 
-            // 如果读取的字节数小于当前 `iovec` 的长度，则停止
+            //// 如果读取的字节数小于当前 `iovec` 的长度，则停止
             if result < iov.iov_len as isize {
                 break;
             }
@@ -306,7 +236,7 @@ pub fn close_all_file_like() {
     // 收集所有文件描述符的 ID
     let all_ids: Vec<_> = fd_table.ids().collect();
 
-    // 遍历所有文件描述符并移除
+    //// 遍历所有文件描述符并移除
     for id in all_ids {
         let _ = fd_table.remove(id);
     }
@@ -314,7 +244,6 @@ pub fn close_all_file_like() {
 ```
 
 ```rust
-
 /// 终止调用进程并执行必要的清理操作
 ///
 /// # 参数
@@ -327,28 +256,12 @@ pub fn close_all_file_like() {
 pub fn sys_exit(status: i32) -> ! {
     // TODO: 唤醒被 `futex` 阻塞并等待 `clear_child_tid` 指针地址的线程。
 
-    // 关闭属于该进程的所有打开的文件描述符
+    //// 关闭属于该进程的所有打开的文件描述符
     close_all_file_like();
 
     // 使用指定的状态码退出进程
     axtask::exit(status);
 }
-
-/// 终止调用进程的线程组中的所有线程
-///
-/// # 参数
-/// - `status`: 进程的退出状态码
-///
-/// # 行为
-/// - 暂时使用 `sys_exit` 处理线程组中所有线程的退出逻辑。
-/// - 使用指定的状态码退出进程。
-pub fn sys_exit_group(status: i32) -> ! {
-    warn!("Temporarily replace sys_exit_group with sys_exit");
-    // TODO: wake up threads, which are blocked by futex, and waiting for the address pointed by clear_child_tid
-    sys_exit(status);
-}
-
-
 ```
 
 **pipe 读取卡死**
