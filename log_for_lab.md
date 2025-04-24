@@ -104,5 +104,35 @@ Asterinas 的进程和线程管理实现与 Linux 接近，主要区别如下：
 
 Asterinas 的进程和线程管理实现借鉴了 Linux 的设计，并进行了简化。与 Linux 和 Windows 相比，其实现更轻量化，功能上有所取舍。
 
-
 **下周计划**：（周六考试结束之后）参考不同的OS，完善我们的进程线程相关设计并开始实现。
+
+
+
+
+# week 10 进展报告 0424
+
+黄雨婕  2022010887
+
+---
+
+代码重构：继续将部分 syscall 的实现分成接口和实现两部分。
+
+debug：发现并修复了关于 poll 对于 timeout 判定的一个逻辑问题。
+
+```rust
+pub fn sys_poll(fds: &mut [PollFd], timeout: i32) -> i32 {
+    debug!("sys_poll <= fds: {:?}, timeout: {}", fds, timeout);
+    syscall_body!(sys_poll, {
+        let timeout = if timeout < 0 {
+            0
+        } else {
+            timeout as u64 * NANOS_PER_MICROS
+        };
+        sys_poll_impl(fds, timeout, timeout < 0)
+    })
+}
+```
+
+线程进程相关：尝试参照了另一组的实现，看完代码之后觉得结构差异太大，强行合并还不如自己实现，至少不用对着别人写的代码debug。
+
+下周计划：五一放假，下次开会应该是两周之后，希望到时候能至少实现 进程线程 相关的部分。
