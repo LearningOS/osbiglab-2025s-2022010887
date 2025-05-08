@@ -106,9 +106,6 @@ Asterinas 的进程和线程管理实现借鉴了 Linux 的设计，并进行了
 
 **下周计划**：（周六考试结束之后）参考不同的OS，完善我们的进程线程相关设计并开始实现。
 
-
-
-
 # week 10 进展报告 0424
 
 黄雨婕  2022010887
@@ -136,3 +133,40 @@ pub fn sys_poll(fds: &mut [PollFd], timeout: i32) -> i32 {
 线程进程相关：尝试参照了另一组的实现，看完代码之后觉得结构差异太大，强行合并还不如自己实现，至少不用对着别人写的代码debug。
 
 下周计划：五一放假，下次开会应该是两周之后，希望到时候能至少实现 进程线程 相关的部分。
+
+
+# week 12 进展报告 0508
+
+黄雨婕  2022010887
+
+**本周进展：**
+
+- 跑了LTP、iozone，发现缺少系统调用，于是实现了sys_sync 、sys_fsync、sys_truncate、sys_ftruncate、sys_prlimit64、sys_setrlimit 、sys_getrlimit等。( 之前没写 get_process_data_by_id 方法，没办法修改 resource_limit 字段)
+
+**待解决的问题：**
+
+- LTP希望读写meminfo 文件，目前还没解决。
+
+```
+vi /proc/meminfo
+```
+
+```
+MemTotal:        7993708 kB
+MemFree:         6955792 kB
+MemAvailable:    6884312 kB
+Buffers:           11588 kB
+Cached:            64856 kB
+SwapCached:        76020 kB
+Active:           117492 kB
+Inactive:         432340 kB
+Active(anon):      74064 kB
+Inactive(anon):   402012 kB
+Active(file):      43428 kB
+Inactive(file):    30328 kB
+...
+```
+
+- 编写 sys_renameat 的时候发现底层库报错 `rc=2`。
+
+**下周计划：LTP、iozone**
